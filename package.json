@@ -3,6 +3,7 @@
   "version": "5.0.3",
   "description": "Tools for working with the SVF format used by Autodesk Platform Services.",
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "bin": {
     "svf-to-gltf": "./bin/svf-to-gltf.js"
   },

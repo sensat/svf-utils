@@ -158,6 +158,7 @@ export interface ILines {
     indices: Uint16Array; // Index buffer (of length lcount*2)
     colors?: Float32Array; // Optional color buffer (of length vcount*3)
     lineWidth: number;
+    bounds: Uint16Array;
 }
 
 /**
