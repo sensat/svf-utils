@@ -173,6 +173,7 @@ function parseLines(pfr: PackFileReader, entryVersion: number): ILines {
         lcount: indexCount / 2,
         vertices: new Float32Array(vertexCount * 3),
         indices: new Uint16Array(indexCount),
+        bounds: new Uint16Array(boundsCount),
         lineWidth
     };
 
@@ -195,6 +196,9 @@ function parseLines(pfr: PackFileReader, entryVersion: number): ILines {
     }
 
     // TODO: Parse polyline bounds
+    for (let i = 0, len = boundsCount; i < len; i++) {
+        lines.bounds[i] = pfr.getUint16();
+    }
 
     return lines;
 }

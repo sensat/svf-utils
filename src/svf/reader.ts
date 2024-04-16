@@ -88,7 +88,8 @@ export class Scene implements IMF.IScene {
                     kind: IMF.GeometryKind.Lines,
                     getIndices: () => mesh.indices,
                     getVertices: () => mesh.vertices,
-                    getColors: () => mesh.colors
+                    getColors: () => mesh.colors,
+                    getBounds: () => mesh.bounds
                 };
                 return geom;
             } else if ('isPoints' in mesh) {
