@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB Model Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #e0e0e0;
+            overflow: hidden;
+            height: 100vh;
+        }
+        #container { width: 100vw; height: 100vh; }
+        canvas { display: block; }
+
+        /* Loading overlay */
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(26, 26, 46, 0.95);
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 1000;
+            transition: opacity 0.5s;
+        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
+        #loading h2 { margin-bottom: 20px; font-size: 20px; font-weight: 400; }
+        #progress-bar {
+            width: 300px; height: 4px; background: #333; border-radius: 2px; overflow: hidden;
+        }
+        #progress-fill {
+            width: 0%; height: 100%; background: #4fc3f7; transition: width 0.3s;
+        }
+        #progress-text { margin-top: 12px; font-size: 13px; color: #999; }
+
+        /* Info panel */
+        #info {
+            position: fixed; top: 16px; left: 16px; z-index: 100;
+            background: rgba(26, 26, 46, 0.85);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 12px 16px;
+            font-size: 12px; line-height: 1.6;
+            max-width: 280px;
+            backdrop-filter: blur(10px);
+        }
+        #info h3 { font-size: 14px; margin-bottom: 6px; color: #4fc3f7; font-weight: 500; }
+        #info .stat { color: #888; }
+        #info .stat span { color: #ccc; }
+
+        /* Controls hint */
+        #controls {
+            position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+            z-index: 100;
+            background: rgba(26, 26, 46, 0.7);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 6px; padding: 8px 16px;
+            font-size: 11px; color: #666;
+            backdrop-filter: blur(10px);
+        }
+
+        /* Error */
+        #error {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #2a1a1a; border: 1px solid #ff4444;
+            border-radius: 8px; padding: 20px 24px;
+            z-index: 2000; display: none; max-width: 400px; text-align: center;
+        }
+        #error h3 { color: #ff6666; margin-bottom: 8px; }
+        #error p { font-size: 13px; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <h2>Loading Model...</h2>
+        <div id="progress-bar"><div id="progress-fill"></div></div>
+        <div id="progress-text">Preparing...</div>
+    </div>
+
+    <div id="info">
+        <h3>GLB Model Viewer</h3>
+        <div class="stat">Triangles: <span id="tri-count">-</span></div>
+        <div class="stat">Meshes: <span id="mesh-count">-</span></div>
+        <div class="stat">Memory: <span id="mem-usage">-</span></div>
+    </div>
+
+    <div id="controls">
+        Left-drag: Rotate &nbsp;&bull;&nbsp; Right-drag: Pan &nbsp;&bull;&nbsp; Scroll: Zoom
+    </div>
+
+    <div id="error">
+        <h3>Loading Failed</h3>
+        <p id="error-msg"></p>
+    </div>
+
+    <div id="container"></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        // Model URL: can be set via query string (?model=path/to/file.glb)
+        // or defaults to ./output.glb
+        const params = new URLSearchParams(window.location.search);
+        const MODEL_URL = params.get('model') || './output.glb';
+
+        // --- Scene setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 10000);
+        camera.position.set(50, 50, 50);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Environment for PBR materials
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        const envTexture = pmremGenerator.fromScene(new RoomEnvironment()).texture;
+        scene.environment = envTexture;
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.1;
+        controls.screenSpacePanning = true;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        dirLight.position.set(50, 100, 50);
+        scene.add(dirLight);
+
+        // --- Loading ---
+        const loadingEl = document.getElementById('loading');
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+
+        const loader = new GLTFLoader();
+
+        // Draco decoder for compressed models
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/');
+        loader.setDRACOLoader(dracoLoader);
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+
+        loader.load(
+            MODEL_URL,
+            (gltf) => {
+                const model = gltf.scene;
+                scene.add(model);
+
+                // Fit camera to model
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                controls.target.copy(center);
+                camera.position.copy(center).add(
+                    new THREE.Vector3(maxDim * 0.8, maxDim * 0.6, maxDim * 0.8)
+                );
+                camera.near = maxDim * 0.001;
+                camera.far = maxDim * 10;
+                camera.updateProjectionMatrix();
+                controls.update();
+
+                // Stats
+                let triCount = 0, meshCount = 0;
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        meshCount++;
+                        if (child.geometry.index) {
+                            triCount += child.geometry.index.count / 3;
+                        } else if (child.geometry.attributes.position) {
+                            triCount += child.geometry.attributes.position.count / 3;
+                        }
+                    }
+                });
+                document.getElementById('tri-count').textContent = triCount.toLocaleString();
+                document.getElementById('mesh-count').textContent = meshCount.toLocaleString();
+                document.getElementById('mem-usage').textContent = formatBytes(triCount * 3 * 32);
+
+                // Hide loading
+                loadingEl.classList.add('hidden');
+                setTimeout(() => loadingEl.style.display = 'none', 600);
+            },
+            (progress) => {
+                if (progress.total > 0) {
+                    const pct = (progress.loaded / progress.total * 100).toFixed(1);
+                    progressFill.style.width = pct + '%';
+                    progressText.textContent = `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)} (${pct}%)`;
+                } else {
+                    progressText.textContent = `Loaded: ${formatBytes(progress.loaded)}`;
+                }
+            },
+            (error) => {
+                console.error('Loading error:', error);
+                loadingEl.style.display = 'none';
+                const errorEl = document.getElementById('error');
+                document.getElementById('error-msg').textContent =
+                    error.message || 'Check console for details. Make sure the server is running and the model files are accessible.';
+                errorEl.style.display = 'block';
+            }
+        );
+
+        // --- Animation loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

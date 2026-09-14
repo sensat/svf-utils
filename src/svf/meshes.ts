@@ -183,9 +183,13 @@ function parseLines(pfr: PackFileReader, entryVersion: number): ILines {
     }
 
     // Parse colors
+    // NOTE: line colors are stored as RGBA (4 float32 per vertex), not RGB.
+    // Assuming 3 floats per vertex shifted the index and bounds buffers by
+    // vertexCount * 4 bytes whenever a Lines entry had colors, producing
+    // garbage indices (the "spider web" rendering artifact).
     if (hasColors) {
-        lines.colors = new Float32Array(vertexCount * 3);
-        for (let i = 0, len = vertexCount * 3; i < len; i++) {
+        lines.colors = new Float32Array(vertexCount * 4);
+        for (let i = 0, len = vertexCount * 4; i < len; i++) {
             lines.colors[i] = pfr.getFloat32();
         }
     }

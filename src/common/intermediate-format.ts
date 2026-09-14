@@ -78,6 +78,10 @@ export interface IObjectNode {
     transform?: Transform;
     geometry: GeometryID;
     material: MaterialID;
+    /** Optional per-node label that writers may use for grouping and naming,
+     *  e.g. a BIM tree path such as "building|level|category|family|type".
+     *  Scenes that want merged output grouped by element type can provide it. */
+    treePath?: string;
 }
 
 export interface ICameraNode {

@@ -31,6 +31,8 @@ Utilities for converting [Autodesk Platform Services](https://aps.autodesk.com) 
   - `--ignore-lines` to exclude line geometry from the output
   - `--ignore-points` to exclude point geometry from the output
   - `--center` move the model to origin
+  - `--merging` to merge fragments into a single GLB, one mesh per tree path and material
+  - `--tree-paths <file>` to group and name the merged output by BIM tree path (see _samples/build-tree-paths.js_)
 
 #### Unix/macOS
 
@@ -115,6 +117,60 @@ for (const mesh of parseMeshes(buffer)) {
 
 > For additional examples, see the [samples](./samples) subfolder.
 
+### Merging GLB output
+
+The default `GltfWriter` emits one glTF mesh per SVF fragment. On large models that means a very
+large output - a model with hundreds of thousands of fragments easily reaches several gigabytes -
+and, at render time, one draw call per fragment.
+
+`MergingGLTFWriter` takes the same `IScene` as `GltfWriter`, but produces a single, much smaller GLB
+instead. It:
+
+1. bakes node transforms into the vertex positions and normals (no per-node transform overhead)
+2. merges fragments that share a material into a single mesh (one draw call per material)
+3. writes one self-contained `.glb`, with no sibling `.bin` file
+
+```js
+const { MergingGLTFWriter } = require('svf-utils');
+
+const scene = await reader.read();
+const writer = new MergingGLTFWriter({
+    center: true,     // move the model to the origin (default: true)
+    log: console.log  // optional progress callback
+});
+await writer.write(scene, 'output.glb');
+```
+
+Each mesh and node is named with the tree path of the fragments it merges (`<level>|<category>|<family>|<type>`,
+or `Uncategorized`), so a viewer can rebuild a filterable model tree from the GLB alone. The same path is
+repeated in `extras.path`, because three.js `GLTFLoader` sanitizes node and mesh names - spaces become
+underscores and `[ ] . : /` are stripped - which would otherwise break lookups by path for anything derived
+from a filename such as _model.nwc_. `GLTFLoader` copies `extras` verbatim into `object.userData`.
+
+Because the output is a plain GLB, it can be passed on to any external post-processing tool.
+
+#### From the command line
+
+By default the `svf-to-gltf` command runs `GltfWriter`, which writes a `.gltf` + `.bin` pair per view.
+With `--merging` it runs `MergingGLTFWriter` instead and writes a single `<guid>.glb`:
+
+```
+svf-to-gltf <urn> <guid> --merging --output-folder <path to output folder>
+```
+
+Add `--tree-paths` to group and name the merged meshes by BIM tree path; the file it reads is produced
+by _samples/build-tree-paths.js_, which derives a dbID to path mapping from the object hierarchy that
+the Model Derivative properties endpoint exposes:
+
+```
+node samples/build-tree-paths.js <urn> -o tree-paths.json
+svf-to-gltf <urn> <guid> --merging --tree-paths tree-paths.json
+```
+
+Without `--tree-paths` the whole model lands in a single `Uncategorized` group. What counts as a level
+of the tree path is model-specific, so _samples/build-tree-paths.js_ is meant to be adapted (the depth
+is configurable with `-d`, and synthetic containers are dropped).
+
 ### Customization
 
 You can customize the translation by sub-classing the reader and/or the writer class. For example:
@@ -164,6 +220,17 @@ and instead leave it to developers to "pipe" the output of this library to other
 such as https://github.com/CesiumGS/gltf-pipeline or https://github.com/zeux/meshoptimizer.
 See [./samples/local-svf-to-gltf.sh](./samples/local-svf-to-gltf.sh) or
 [./samples/remote-svf-to-gltf.sh](./samples/remote-svf-to-gltf.sh) for examples.
+
+### Web viewer
+
+[samples/viewer.html](./samples/viewer.html) is a small three.js viewer for GLB files. Serve it over
+HTTP and point it at a model with the `model` query parameter:
+
+```
+# run this from the directory that contains your .glb file
+python3 -m http.server 8080
+# then open http://localhost:8080/samples/viewer.html?model=./output.glb
+```
 
 ## Development
 
